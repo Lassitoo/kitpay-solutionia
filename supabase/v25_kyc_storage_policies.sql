@@ -6,6 +6,8 @@
 -- - service_role : tout
 -- =====================================================================
 
+SET ROLE supabase_storage_admin;
+
 -- Activer RLS sur storage.objects (par défaut OFF)
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
@@ -45,3 +47,5 @@ CREATE POLICY "kyc service_role all" ON storage.objects FOR ALL TO service_role
 USING (bucket_id = 'kyc-documents') WITH CHECK (bucket_id = 'kyc-documents');
 
 SELECT 'v25 applied' AS info;
+
+RESET ROLE;

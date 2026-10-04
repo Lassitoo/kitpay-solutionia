@@ -4,6 +4,8 @@
 -- merchant_id + mode + scopes ou rien si invalide/revoked.
 -- =====================================================================
 
+DROP FUNCTION IF EXISTS verify_api_key(text);
+
 CREATE OR REPLACE FUNCTION public.verify_api_key(p_key text)
 RETURNS TABLE(merchant_id uuid, api_key_id uuid, mode text, scopes text[])
 LANGUAGE plpgsql SECURITY DEFINER

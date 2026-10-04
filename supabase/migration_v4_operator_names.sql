@@ -46,6 +46,8 @@ BEGIN
   END LOOP;
 END $$;
 
+ALTER TABLE payment_intents DROP CONSTRAINT IF EXISTS payment_intents_method_check;
+
 -- 3. Recreer la contrainte avec les 6 operateurs corrects
 ALTER TABLE payment_intents
   ADD CONSTRAINT payment_intents_method_check

@@ -25,6 +25,8 @@ export async function submitOnboarding(payload: OnboardingPayload): Promise<{ ok
   const { data: { user }, error: userErr } = await supabase.auth.getUser();
   if (userErr || !user) return { ok: false, error: 'Non authentifié' };
 
+  console.log('DEBUG user.id:', user.id, 'userErr:', userErr);
+
   // Find this user's merchant via merchant_members (RLS-respecting query)
   const { data: members, error: memErr } = await supabase
     .from('merchant_members')
@@ -32,6 +34,8 @@ export async function submitOnboarding(payload: OnboardingPayload): Promise<{ ok
     .eq('user_id', user.id)
     .eq('role', 'owner')
     .limit(1);
+
+  console.log('DEBUG members:', JSON.stringify(members), 'memErr:', JSON.stringify(memErr));
 
   if (memErr || !members || members.length === 0) {
     return { ok: false, error: 'Aucun merchant trouvé pour ce compte' };
