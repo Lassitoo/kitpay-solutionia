@@ -22,7 +22,10 @@ export async function addWebhook(args: { url: string; events: string[] }): Promi
     merchant_id: merchant.id,
     url: cleanUrl,
     secret,
-    events: args.events.length > 0 ? args.events : ['payment.succeeded', 'payment.expired', 'payment.cancelled'],
+    events: args.events.length > 0 ? args.events : [
+      'payment.succeeded', 'payment.expired', 'payment.cancelled',
+      'payout.succeeded', 'payout.expired', 'payout.cancelled',
+    ],
     enabled: true,
   });
   if (error) return { ok: false, error: error.message };

@@ -18,6 +18,8 @@ export type ApiErrorCode =
   | 'idempotency_conflict'
   | 'intent_already_paid'
   | 'intent_not_pending'
+  | 'payout_not_pending'
+  | 'invalid_phone'
   | 'amount_too_low'
   | 'amount_too_high'
   | 'no_operator_for_method'

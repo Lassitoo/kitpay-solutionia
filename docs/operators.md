@@ -146,3 +146,23 @@ Voir la section "Common tasks a user will ask you to do" #3 dans
 4. Etendre `METHOD_FN` et `VALID_METHODS`.
 5. Documenter le SMS dans ce fichier.
 6. Ajouter une fixture dans `tests/test-methods-parser.mjs`.
+
+## SMS de debit
+
+Les SMS de debit (le marchand envoie de l'argent) servent aux paiements
+sortants suivis, voir [payouts.md](./payouts.md). Ils sont lus par
+`parseDebitSms()` dans `src/lib/sms/debit.ts`, avant les SMS de credit.
+
+Formats reels : a completer. Aucun SMS de debit reel n'a encore ete
+collecte. La lecture actuelle reconnait les formulations usuelles
+("vous avez envoye", "transfert effectue", "envoye a", "debit"...),
+lit le premier montant en MRU, le premier numero mauritanien a 8
+chiffres et une reference ("Ref", "Transaction N°", "ID", "#").
+
+Pour chaque operateur, apres un premier transfert reel :
+
+1. Recuperer le SMS (Telegram "SMS non reconnu" ou "SMS de debit sans
+   paiement annonce", ou table `orphan_sms`).
+2. L'ajouter ici (anonymise) et en fixture dans
+   `tests/unit/debit-sms.test.ts`.
+3. Ajuster `DEBIT_PATTERNS` si besoin.
