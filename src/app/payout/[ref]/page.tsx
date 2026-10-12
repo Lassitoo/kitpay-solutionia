@@ -16,6 +16,7 @@ type PayoutRow = {
   recipient_phone: string;
   recipient_name: string | null;
   description: string | null;
+  metadata: Record<string, unknown> | null;
   status: string;
   operator_reference: string | null;
   client_secret: string | null;
@@ -40,6 +41,11 @@ const METHOD_LOGOS: Record<string, string> = {
   bcipay: '/payments/bcipay.png',
 };
 
+// 36123456 -> 36 12 34 56 (plus facile a recopier dans l'appli operateur).
+function formatPhone(phone: string): string {
+  return phone.replace(/(\d{2})(?=\d)/g, '$1 ');
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   return new Intl.DateTimeFormat('fr-FR', {
@@ -56,7 +62,7 @@ export default async function PayoutPage({
   const admin = createSupabaseAdminClient();
   const { data: payout } = await admin
     .from('payout_intents')
-    .select('ref, merchant_id, mode, method, amount, amount_with_fees, recipient_phone, recipient_name, description, status, operator_reference, client_secret, created_at, expires_at, paid_at')
+    .select('ref, merchant_id, mode, method, amount, amount_with_fees, recipient_phone, recipient_name, description, metadata, status, operator_reference, client_secret, created_at, expires_at, paid_at')
     .eq('ref', params.ref)
     .maybeSingle<PayoutRow>();
 
@@ -72,9 +78,15 @@ export default async function PayoutPage({
 
   const status = STATUS_LABELS[payout.status] ?? { label: payout.status, color: 'var(--stone-500)' };
   const logo = METHOD_LOGOS[payout.method.toLowerCase()] ?? null;
+  // Moyen choisi par le marchand : code marchand du destinataire (paiement
+  // par code, sans frais) ou son numero -- envoye par l'application
+  // marchande dans metadata.code_marchand (voir docs/payouts.md).
+  const rawCode = payout.metadata?.code_marchand;
+  const merchantCode = typeof rawCode === 'string' && rawCode.trim() ? rawCode.trim() : null;
   const rows: Array<[string, string]> = [
     ['Bénéficiaire', payout.recipient_name || '—'],
-    ['Numéro', payout.recipient_phone || 'Paiement par code marchand'],
+    ...(merchantCode ? [['Code marchand', merchantCode] as [string, string]] : []),
+    ...(payout.recipient_phone ? [['Numéro', formatPhone(payout.recipient_phone)] as [string, string]] : []),
     ['Opérateur', payout.method],
     ...(payout.amount_with_fees && payout.amount_with_fees !== payout.amount
       ? [['Débité frais compris', formatMRU(payout.amount_with_fees)] as [string, string]]
@@ -110,6 +122,20 @@ export default async function PayoutPage({
             {status.label}
           </div>
 
+          <div className="mt-6 border border-[var(--bronze)]/40 bg-[var(--gold-soft)]/30 rounded-sm px-5 py-4">
+            <p className="kp-eyebrow text-[var(--bronze)] mb-2">
+              — {merchantCode ? `Payer par code marchand ${payout.method}` : `Payer au numéro ${payout.method}`}
+            </p>
+            <p className="font-mono text-3xl font-semibold text-[var(--ink)] tracking-wider">
+              {merchantCode ?? (payout.recipient_phone ? formatPhone(payout.recipient_phone) : '—')}
+            </p>
+            <p className="mt-1 text-sm text-[var(--stone-600)]">
+              {formatMRU(payout.amount)}
+              {payout.recipient_name ? ` à ${payout.recipient_name}` : ''}
+              {merchantCode ? ' · sans frais de transfert' : ''}
+            </p>
+          </div>
+
           <dl className="mt-7 bg-[var(--paper-warm)] border border-[var(--stone-200)] rounded-sm divide-y divide-[var(--stone-200)]">
             {rows.map(([label, value]) => (
               <div key={label} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
@@ -121,8 +147,9 @@ export default async function PayoutPage({
 
           {payout.status === 'pending' && payout.mode !== 'test' && (
             <p className="mt-5 text-sm text-[var(--stone-600)] leading-relaxed">
-              Faites le transfert depuis le compte {payout.method} : le paiement sera confirmé
-              automatiquement à la réception du SMS de débit.
+              Faites le transfert depuis le compte {payout.method}
+              {merchantCode ? ` avec le code marchand ${merchantCode}` : ''} : le paiement sera
+              confirmé automatiquement à la réception du SMS de débit.
             </p>
           )}
 
