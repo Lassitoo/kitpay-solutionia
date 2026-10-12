@@ -1,10 +1,15 @@
 import { notFound } from 'next/navigation';
+import { unstable_noStore as noStore } from 'next/cache';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { formatMRU } from '@/lib/format';
 import { PayoutActions } from './PayoutActions';
 
 export const metadata = { title: 'Paiement sortant · KitPay' };
 export const dynamic = 'force-dynamic';
+// Le statut change en direct (SMS de debit, simulation) : jamais de lecture
+// Supabase servie depuis le cache de Next, sinon la page reste "en attente".
+export const fetchCache = 'force-no-store';
+export const revalidate = 0;
 
 type PayoutRow = {
   ref: string;
@@ -16,6 +21,7 @@ type PayoutRow = {
   recipient_phone: string;
   recipient_name: string | null;
   description: string | null;
+  metadata: Record<string, unknown> | null;
   status: string;
   operator_reference: string | null;
   client_secret: string | null;
@@ -40,6 +46,11 @@ const METHOD_LOGOS: Record<string, string> = {
   bcipay: '/payments/bcipay.png',
 };
 
+// 36123456 -> 36 12 34 56 (plus facile a recopier dans l'appli operateur).
+function formatPhone(phone: string): string {
+  return phone.replace(/(\d{2})(?=\d)/g, '$1 ');
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   return new Intl.DateTimeFormat('fr-FR', {
@@ -53,10 +64,11 @@ function formatDate(iso: string | null): string {
 export default async function PayoutPage({
   params, searchParams,
 }: { params: { ref: string }; searchParams: { cs?: string } }) {
+  noStore();
   const admin = createSupabaseAdminClient();
   const { data: payout } = await admin
     .from('payout_intents')
-    .select('ref, merchant_id, mode, method, amount, amount_with_fees, recipient_phone, recipient_name, description, status, operator_reference, client_secret, created_at, expires_at, paid_at')
+    .select('ref, merchant_id, mode, method, amount, amount_with_fees, recipient_phone, recipient_name, description, metadata, status, operator_reference, client_secret, created_at, expires_at, paid_at')
     .eq('ref', params.ref)
     .maybeSingle<PayoutRow>();
 
@@ -72,9 +84,20 @@ export default async function PayoutPage({
 
   const status = STATUS_LABELS[payout.status] ?? { label: payout.status, color: 'var(--stone-500)' };
   const logo = METHOD_LOGOS[payout.method.toLowerCase()] ?? null;
+  // Moyen choisi par le marchand : code marchand du destinataire (paiement
+  // par code, sans frais) ou son numero -- envoye par l'application
+  // marchande dans metadata.code_marchand (voir docs/payouts.md).
+  const rawCode = payout.metadata?.code_marchand;
+  const merchantCode = typeof rawCode === 'string' && rawCode.trim() ? rawCode.trim() : null;
+  // Page ou revenir apres confirmation (comme success_url des paiements
+  // entrants) : metadata.return_url, http(s) uniquement.
+  const rawReturn = payout.metadata?.return_url;
+  const returnUrl = typeof rawReturn === 'string' && /^https?:\/\//.test(rawReturn) ? rawReturn : null;
+  const isPaid = payout.status === 'paid';
   const rows: Array<[string, string]> = [
     ['Bénéficiaire', payout.recipient_name || '—'],
-    ['Numéro', payout.recipient_phone || 'Paiement par code marchand'],
+    ...(merchantCode ? [['Code marchand', merchantCode] as [string, string]] : []),
+    ...(payout.recipient_phone ? [['Numéro', formatPhone(payout.recipient_phone)] as [string, string]] : []),
     ['Opérateur', payout.method],
     ...(payout.amount_with_fees && payout.amount_with_fees !== payout.amount
       ? [['Débité frais compris', formatMRU(payout.amount_with_fees)] as [string, string]]
@@ -95,35 +118,87 @@ export default async function PayoutPage({
         )}
 
         <div className="bg-white border border-[var(--stone-200)] rounded-sm p-7 sm:p-9 shadow-[0_1px_2px_rgba(0,0,0,0.02),0_24px_60px_-24px_rgba(58,52,42,0.18)]">
-          <p className="kp-eyebrow text-[var(--stone-500)] mb-2">— Paiement sortant · {merchant?.name ?? 'Marchand'}</p>
-          <div className="flex items-center justify-between gap-4">
-            <p className="serif text-5xl font-medium text-[var(--ink)] leading-none tracking-tight">{formatMRU(payout.amount)}</p>
-            {logo && <img src={logo} alt={payout.method} width={44} height={44} className="rounded-sm" />}
-          </div>
-          {payout.description && <p className="mt-3 text-[var(--stone-600)]">{payout.description}</p>}
-
-          <div
-            className="mt-6 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium"
-            style={{ color: status.color, borderColor: status.color }}
-          >
-            {payout.status === 'pending' && <span className="kp-pulse" aria-hidden="true" />}
-            {status.label}
-          </div>
-
-          <dl className="mt-7 bg-[var(--paper-warm)] border border-[var(--stone-200)] rounded-sm divide-y divide-[var(--stone-200)]">
-            {rows.map(([label, value]) => (
-              <div key={label} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
-                <dt className="text-[var(--stone-600)]">{label}</dt>
-                <dd className="font-mono text-[var(--ink)] text-right">{value}</dd>
+          {isPaid ? (
+            <div className="text-center py-2">
+              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--forest)]/[0.08] border border-[var(--forest)]/30">
+                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--forest)]" aria-hidden="true">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
               </div>
-            ))}
-          </dl>
+              <p className="kp-eyebrow text-[var(--forest)] mb-2">— Montant payé</p>
+              <h1 className="serif text-4xl font-medium text-[var(--ink)] leading-none tracking-tight">{formatMRU(payout.amount)}</h1>
+              <p className="mt-3 text-[var(--stone-600)]">
+                {payout.recipient_name ? `à ${payout.recipient_name} · ` : ''}
+                {merchantCode ? `code marchand ${merchantCode}` : (payout.recipient_phone ? formatPhone(payout.recipient_phone) : '')}
+                {` · ${payout.method}`}
+              </p>
+              <dl className="mt-6 text-left bg-[var(--paper-warm)] border border-[var(--stone-200)] rounded-sm divide-y divide-[var(--stone-200)]">
+                {[
+                  ['Référence', payout.ref],
+                  ...(payout.operator_reference ? [['Réf. opérateur', payout.operator_reference]] : []),
+                  ['Confirmé le', formatDate(payout.paid_at)],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
+                    <dt className="text-[var(--stone-600)]">{label}</dt>
+                    <dd className="font-mono text-[var(--ink)] text-right">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              {returnUrl && (
+                <>
+                  <p className="mt-5 text-sm text-[var(--stone-600)]">Redirection en cours…</p>
+                  <a href={returnUrl} className="kp-link mt-3 inline-block">Retour à {merchant?.name ?? "l'application"}</a>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+            <p className="kp-eyebrow text-[var(--stone-500)] mb-2">— Paiement sortant · {merchant?.name ?? 'Marchand'}</p>
+            <div className="flex items-center justify-between gap-4">
+              <p className="serif text-5xl font-medium text-[var(--ink)] leading-none tracking-tight">{formatMRU(payout.amount)}</p>
+              {logo && <img src={logo} alt={payout.method} width={44} height={44} className="rounded-sm" />}
+            </div>
+            {payout.description && <p className="mt-3 text-[var(--stone-600)]">{payout.description}</p>}
 
-          {payout.status === 'pending' && payout.mode !== 'test' && (
-            <p className="mt-5 text-sm text-[var(--stone-600)] leading-relaxed">
-              Faites le transfert depuis le compte {payout.method} : le paiement sera confirmé
-              automatiquement à la réception du SMS de débit.
-            </p>
+            <div
+              className="mt-6 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium"
+              style={{ color: status.color, borderColor: status.color }}
+            >
+              {payout.status === 'pending' && <span className="kp-pulse" aria-hidden="true" />}
+              {status.label}
+            </div>
+
+            <div className="mt-6 border border-[var(--bronze)]/40 bg-[var(--gold-soft)]/30 rounded-sm px-5 py-4">
+              <p className="kp-eyebrow text-[var(--bronze)] mb-2">
+                — {merchantCode ? `Payer par code marchand ${payout.method}` : `Payer au numéro ${payout.method}`}
+              </p>
+              <p className="font-mono text-3xl font-semibold text-[var(--ink)] tracking-wider">
+                {merchantCode ?? (payout.recipient_phone ? formatPhone(payout.recipient_phone) : '—')}
+              </p>
+              <p className="mt-1 text-sm text-[var(--stone-600)]">
+                {formatMRU(payout.amount)}
+                {payout.recipient_name ? ` à ${payout.recipient_name}` : ''}
+                {merchantCode ? ' · sans frais de transfert' : ''}
+              </p>
+            </div>
+
+            <dl className="mt-7 bg-[var(--paper-warm)] border border-[var(--stone-200)] rounded-sm divide-y divide-[var(--stone-200)]">
+              {rows.map(([label, value]) => (
+                <div key={label} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
+                  <dt className="text-[var(--stone-600)]">{label}</dt>
+                  <dd className="font-mono text-[var(--ink)] text-right">{value}</dd>
+                </div>
+              ))}
+            </dl>
+
+            {payout.status === 'pending' && payout.mode !== 'test' && (
+              <p className="mt-5 text-sm text-[var(--stone-600)] leading-relaxed">
+                Faites le transfert depuis le compte {payout.method}
+                {merchantCode ? ` avec le code marchand ${merchantCode}` : ''} : le paiement sera
+                confirmé automatiquement à la réception du SMS de débit.
+              </p>
+            )}
+            </>
           )}
 
           <PayoutActions
@@ -131,6 +206,7 @@ export default async function PayoutPage({
             clientSecret={payout.client_secret}
             status={payout.status}
             canSimulate={payout.mode === 'test' && payout.status === 'pending'}
+            returnUrl={returnUrl}
           />
         </div>
 

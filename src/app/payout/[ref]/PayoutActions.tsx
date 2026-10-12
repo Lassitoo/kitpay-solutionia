@@ -8,12 +8,13 @@ type Props = {
   clientSecret: string;
   status: string;
   canSimulate: boolean;
+  returnUrl?: string | null;
 };
 
 // Rafraichit la page tant que le paiement sortant attend son SMS de debit
 // (statut mis a jour cote serveur), et, en mode test, propose de simuler
 // ce SMS -- meme bouton que "Simuler le paiement" des paiements entrants.
-export function PayoutActions({ refValue, clientSecret, status, canSimulate }: Props) {
+export function PayoutActions({ refValue, clientSecret, status, canSimulate, returnUrl }: Props) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -23,6 +24,14 @@ export function PayoutActions({ refValue, clientSecret, status, canSimulate }: P
     const timer = setInterval(() => router.refresh(), 5000);
     return () => clearInterval(timer);
   }, [status, router]);
+
+  // Comme les paiements entrants : une fois le montant paye, retour
+  // automatique vers l'application du marchand au bout de 3 secondes.
+  useEffect(() => {
+    if (status !== 'paid' || !returnUrl) return;
+    const timer = setTimeout(() => { window.location.href = returnUrl; }, 3000);
+    return () => clearTimeout(timer);
+  }, [status, returnUrl]);
 
   async function simulate() {
     setPending(true);
