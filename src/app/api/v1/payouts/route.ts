@@ -5,8 +5,10 @@ import { hashBody, lookupIdempotency, saveIdempotency } from '@/lib/api/idempote
 import { checkRateLimit } from '@/lib/api/rate-limit';
 import { logApiCall } from '@/lib/api/audit';
 import {
-  PAYOUT_DEFAULT_EXPIRES_IN, generatePayoutRef, serializePayout, validatePayoutInput, type PayoutRecord,
+  PAYOUT_DEFAULT_EXPIRES_IN, generatePayoutRef, payoutHostedUrl, serializePayout, validatePayoutInput,
+  type PayoutRecord,
 } from '@/lib/api/payouts';
+import { generateClientSecret } from '@/lib/api/intents';
 import {
   errBadRequest, errUnauthorized, errForbidden, errConflict, errUnprocessable, errRateLimit, errInternal,
   type ApiErrorCode,
@@ -83,6 +85,7 @@ export async function POST(request: NextRequest) {
       status: 'pending',
       idempotency_key: idemKey ?? null,
       expires_at: expiresAt.toISOString(),
+      client_secret: generateClientSecret(),
     })
     .select('*')
     .single();
@@ -93,7 +96,13 @@ export async function POST(request: NextRequest) {
     return errInternal();
   }
 
-  const responseBody = serializePayout(inserted as PayoutRecord);
+  const row = inserted as PayoutRecord;
+  // hosted_url : page du paiement sortant (statut ; simulation en mode
+  // test), a ouvrir depuis l'application du marchand.
+  const responseBody = {
+    ...serializePayout(row),
+    hosted_url: payoutHostedUrl(new URL(request.url).origin, row),
+  };
   if (idemKey) await saveIdempotency(ctx.merchantId, idemKey, hashBody(rawBody), 201, responseBody);
   logApiCall({ request, merchantId: ctx.merchantId, apiKeyId: ctx.apiKeyId, endpoint, method: 'POST', statusCode: 201, body: rawBody });
   return NextResponse.json(responseBody, { status: 201 });
