@@ -3,7 +3,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { authenticateApi } from '@/lib/api/auth';
 import { checkRateLimit } from '@/lib/api/rate-limit';
 import { logApiCall } from '@/lib/api/audit';
-import { serializePayout, type PayoutRecord } from '@/lib/api/payouts';
+import { payoutHostedUrl, serializePayout, type PayoutRecord } from '@/lib/api/payouts';
 import { errUnauthorized, errNotFound, errRateLimit, errInternal } from '@/lib/api/errors';
 
 // GET /api/v1/payouts/{ref} : un paiement sortant (statut, reference
@@ -34,5 +34,6 @@ export async function GET(request: NextRequest, { params }: { params: { ref: str
     return errNotFound('Payout');
   }
   logApiCall({ request, merchantId: ctx.merchantId, apiKeyId: ctx.apiKeyId, endpoint, method: 'GET', statusCode: 200 });
-  return NextResponse.json(serializePayout(data as PayoutRecord));
+  const row = data as PayoutRecord;
+  return NextResponse.json({ ...serializePayout(row), hosted_url: payoutHostedUrl(new URL(request.url).origin, row) });
 }

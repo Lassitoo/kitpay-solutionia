@@ -51,7 +51,15 @@ export type PayoutRecord = {
   expires_at: string;
   paid_at: string | null;
   cancelled_at: string | null;
+  client_secret?: string | null;
 };
+
+// Page du paiement sortant (statut, simulation en mode test), reservee a
+// qui detient le client_secret -- voir src/app/payout/[ref]/page.tsx.
+export function payoutHostedUrl(origin: string, row: Pick<PayoutRecord, 'ref' | 'client_secret'>): string | null {
+  if (!row.client_secret) return null;
+  return `${origin}/payout/${row.ref}?cs=${encodeURIComponent(row.client_secret)}`;
+}
 
 // Les 8 chiffres d'un numero mauritanien, sans +222 / 00222 ni espaces.
 export function normalizeMauritanianPhone(raw: string): string | null {
