@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sendReceiptEmail } from "@/lib/email";
-import { notifyPaymentConfirmed } from "@/lib/telegram";
+import {
+  notifyPaymentConfirmed, notifyPayoutConfirmed, notifyUnmatchedDebitSms, notifyUnreadableSms,
+} from "@/lib/telegram";
+import { detectMethod, parseDebitSms } from "@/lib/sms/debit";
 import type { PaymentIntent } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -110,13 +113,50 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "SMS body manquant" }, { status: 400 });
   }
 
+  const sb = supabaseAdmin();
+
+  // SMS de DEBIT (le marchand a envoye de l'argent) : teste AVANT les
+  // credits, pour qu'un envoi ne soit jamais lu comme un paiement recu.
+  // Rapproche d'un paiement sortant annonce (supabase/v38_payout_intents.sql).
+  const debit = parseDebitSms(from, rawSms);
+  if (debit) {
+    const { data: payoutMatch, error: payoutError } = await sb.rpc("match_payout", {
+      p_method: debit.method,
+      p_amount: debit.amount,
+      p_recipient_phone: debit.recipientPhone,
+      p_operator_ref: debit.operatorRef ?? "",
+      p_raw_sms: rawSms.slice(0, 1000),
+      p_sender: from.slice(0, 60),
+    });
+    if (payoutError) {
+      console.error("[sms-ingest] match_payout error", payoutError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
+    const result = payoutMatch as { matched?: boolean; ref?: string; reason?: string } | null;
+    if (result?.matched && result.ref) {
+      const { data: payout } = await sb.from("payout_intents").select("*").eq("ref", result.ref).single();
+      if (payout) notifyPayoutConfirmed(payout).catch((e) => console.error("[sms-ingest] telegram error", e));
+      return NextResponse.json({ ok: true, direction: "out", matched: true, ref: result.ref });
+    }
+    notifyUnmatchedDebitSms({ ...debit, raw: rawSms, reason: result?.reason ?? "no_payout_found" })
+      .catch((e) => console.error("[sms-ingest] telegram error", e));
+    return NextResponse.json({ ok: true, direction: "out", matched: false, parsed: debit, debug: result });
+  }
+
   const parsed = parseSms(from, rawSms);
   if (!parsed) {
     console.warn("[sms-ingest] parse_failed", { from, sms: rawSms.slice(0, 100) });
+    // SMS d'un operateur que KitPay ne sait pas lire : garde (au lieu
+    // d'etre perdu) et envoye sur Telegram, pour apprendre son format.
+    if (detectMethod(from, rawSms)) {
+      await sb.from("orphan_sms").insert({
+        raw_body: rawSms.slice(0, 1000), parsed_method: detectMethod(from, rawSms), direction: "unknown",
+        sender: from.slice(0, 60),
+      });
+      notifyUnreadableSms(from, rawSms).catch((e) => console.error("[sms-ingest] telegram error", e));
+    }
     return NextResponse.json({ ok: false, matched: false, error: "parse_failed", from, sms: rawSms.slice(0, 100) });
   }
-
-  const sb = supabaseAdmin();
 
   // Fonctions dédiées par méthode — elles appellent enqueue_webhook_delivery
   const METHOD_FN: Record<string, string> = {

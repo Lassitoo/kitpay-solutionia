@@ -31,6 +31,11 @@ async function handle(req: NextRequest) {
 
   const sb = supabaseAdmin();
 
+  // Paiements sortants annoncés dont le SMS de débit n'est jamais arrivé :
+  // passés à 'expired' avec un webhook payout.expired (voir v38).
+  const { data: payoutsExpired, error: payoutsError } = await sb.rpc("expire_old_payouts");
+  if (payoutsError) console.error("[cron/expire-intents] expire_old_payouts error", payoutsError);
+
   // Récupérer les intents à expirer (pour pouvoir les notifier avant l'update)
   const { data: toExpire } = await sb
     .from("payment_intents")
@@ -41,7 +46,7 @@ async function handle(req: NextRequest) {
   const intents = (toExpire || []) as PaymentIntent[];
 
   if (intents.length === 0) {
-    return NextResponse.json({ expired: 0 });
+    return NextResponse.json({ expired: 0, payouts_expired: payoutsExpired ?? 0 });
   }
 
   // Marquer comme expirés
@@ -53,6 +58,7 @@ async function handle(req: NextRequest) {
 
   return NextResponse.json({
     expired: intents.length,
-    refs
+    refs,
+    payouts_expired: payoutsExpired ?? 0
   });
 }

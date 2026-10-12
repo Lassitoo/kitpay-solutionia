@@ -6,7 +6,10 @@ import { Modal } from '@/components/dashboard/Modal';
 import { CopyButton } from '@/components/dashboard/CopyButton';
 import { addWebhook } from './actions';
 
-const ALL_EVENTS = ['payment.succeeded', 'payment.expired', 'payment.cancelled'];
+const ALL_EVENTS = [
+  'payment.succeeded', 'payment.expired', 'payment.cancelled',
+  'payout.succeeded', 'payout.expired', 'payout.cancelled',
+];
 
 export function AddWebhookButton() {
   const router = useRouter();
