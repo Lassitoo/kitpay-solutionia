@@ -68,6 +68,12 @@ DROP POLICY IF EXISTS "service all payouts" ON public.payout_intents;
 CREATE POLICY "service all payouts" ON public.payout_intents
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
+-- Droits explicites (les privileges par defaut ne sont pas accordes sur
+-- tous les projets Supabase, voir v39).
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.payout_intents TO service_role;
+GRANT SELECT ON TABLE public.payout_intents TO authenticated;
+REVOKE ALL ON TABLE public.payout_intents FROM anon;
+
 -- SMS non rapproches : on distingue desormais les credits ('in'), les
 -- debits ('out') et les SMS illisibles ('unknown', gardes pour apprendre
 -- leur format au lieu d'etre perdus).
